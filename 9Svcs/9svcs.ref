@@ -1,0 +1,17 @@
+Access an App with a Service
+- Expose command created a service for the nginx deployment.
+
+$ kubectl expose deployment/nginx --port=80 --type=NodePort
+$ kubectl get Service
+$ kubectl get Service nginx -o yaml
+apiVersion: v1
+kind: Service
+,,,
+spec:
+  clusterIP: 10.0.0.112
+  ports:
+  - NodePort: 31230
+...
+
+Open browser http://Public-IP:31230
+
