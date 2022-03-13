@@ -15,3 +15,9 @@ spec:
 
 Open browser http://Public-IP:31230
 
+The kubectl proxy command creates a local service to access a ClusterIP, useful for troubleshooting or dev work.
+
+A LocalBalancer does not create a load balancer. Instead, it ceates a NodePort and make an async request to use a load balancer.
+An ingress controller is a microsvc running in a pod, listening to a high port on whichever node the pod may be running, which will send traffic to a Service based on the URL requested.
+The ingress controller is not a built-in service.
+
