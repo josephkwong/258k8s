@@ -15,11 +15,10 @@ spec:
 
 Open browser http://Public-IP:31230
 
-The kubectl proxy command creates a local service to access a ClusterIP, useful for troubleshooting or dev work.
-
-A LocalBalancer does not create a load balancer. Instead, it ceates a NodePort and make an async request to use a load balancer.
-An ingress controller is a microsvc running in a pod, listening to a high port on whichever node the pod may be running, which will send traffic to a Service based on the URL requested.
-The ingress controller is not a built-in service.
+- The kubectl proxy command creates a local service to access a ClusterIP, useful for troubleshooting or dev work.
+- A LocalBalancer does not create a load balancer. Instead, it ceates a NodePort and make an async request to use a load balancer.
+- An ingress controller is a microsvc running in a pod, listening to a high port on whichever node the pod may be running, which will send traffic to a Service based on the URL requested.
+- The ingress controller is not a built-in service.
 
 Local Proxy for Dev:
 Run a proxy.
@@ -29,3 +28,75 @@ Starting to serve on 127.0.0.1:8001
 eg: to access a ghost service.
 http://localhost:8001/api/v1/namespace/default/services/ghost
 http://localhost:8001/api/v1/namespace/default/services/ghost:<port_name>.
+
+
+Deploy a New Svc:
+- Services is also called microservices.
+- Native apps can use the Endpoints API for access.
+- Non-native apps can use a Virtual IP-based bridge to access back end pods.
+
+@tcp:~ $ nano nginx-1.yaml
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: nginx-1
+  labels:
+    system: primary
+    namespace: productdev
+spec:
+  selector:
+    matchLabels:
+      system: primary
+  replicas: 2
+  template:
+    labels:
+      system: primary
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.20.1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          protocol: tcp
+      nodeSelector:
+        system: primaryOne
+
+$ kubectl get nodes --show-labels
+$ kubectl create -f nginx-1.yaml
+Error from server (Not Found):
+"nginx-1.yaml": namespace "productdev" not Found
+$ kubectl create ns productdev
+namespace/productdev created
+$ kubectl create -f nginx-1.yaml
+deployment.apps/nginx-1 created
+$ kubectl -n productdev get pods
+$ kubectl -n productdev describe pods nginx-1-43u3824-fkcp
+(Check the Events at the end of the output.)
+
+@label the seconday node.
+$ kubectl label node wrk system=primaryOne
+$ kubectl get nodes --show-labels
+$ kubectl -n productdev get pods
+(it should 1/1 ready, status=running)
+
+@View Pods by the label we set in the YAML file.
+$ kubectl get pods -l system=primary --all-namespaces
+
+@Expose the port 8080.
+$ kubectl -n productdev expose deployment nginx-1
+service/nginx-1 exposed
+$ kubectl -n productdev get ep nginx-1
+$ curl 192.168.1.112:8080
+curl: (7) Failed to connect to 192.168.1.112 port 8080: Connection refused.
+(Even though we expose port 8080 of the container, the app within has not been configured to listen on this port)
+
+$ curl 192.168.1.112:80
+(it works)
+
+$ kubectl -n productdev delete deploy nginx-1
+$ nano nginx-1.yaml
+        - containerPort: 8080 -> 80
+$ kubectl create -f nginx-1.yaml
+deployment.apps/nginx-1 created
+$ curl 192.168.1.112:80
