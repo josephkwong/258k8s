@@ -100,3 +100,142 @@ $ nano nginx-1.yaml
 $ kubectl create -f nginx-1.yaml
 deployment.apps/nginx-1 created
 $ curl 192.168.1.112:80
+
+
+Configure a NodePort:
+$ kubectl -n productdev expose deployment nginx-1 --type=NodePort --name=svclab
+service/svclab exposed
+$ kubectl -n productdev describe Services
+...
+NodePort:      <unset>  32113/tcp
+---
+
+@locate the exterior facing hostname or IP address of the cluster.
+tcp:~$ kubectl cluster-info
+(look for the Kubernetes tcp URL)
+
+@test access to the nginx web server: tcp URL+NodePort.
+$ curl http://k8scp:32113
+@locate your public IP address
+$ curl ifconfig.io 
+at browser: public IP:32113
+
+
+Working with CoreDNS:
+$ nano nettool.yaml
+apiVersion: v1
+kind: Pod
+metatdata:
+  name: nettool
+  namespace: productdev
+spec:
+  containers:
+  - name: ubtu
+    image: ubuntu:latest
+    command: ["sleep"]
+    args: ["infinity"]
+
+$ kubectl create -f nettool.yaml
+pod/ubtu created
+$ kubectl exec -it ubtu -- /bin/bash
+-> on container
+  root@ubtu:/# apt-get update; apt-get install curl dnsutils -y 
+  # dig   <-- DNS server responding shown
+
+  # cat /etc/resolv.conf   <-- indicate nameservers and default domains to search if no using FQDN
+  
+  # dig @10.86.0.10 -x 10.96.0.10
+  (the -x argument to get the FQDN using the IP we know)
+  
+  # curl svclab.productdev.svc.cluster.local 
+  ( it works.)
+  
+  # curl svclab 
+  curl: (6) Could not resolve host: svclab 
+  (The nettool is in the default ns so it fails.)
+
+  # curl svclab.productdev
+  (it works.)
+
+  # exit 
+
+$ kubectl -n kube-system get svc 
+(the kube-dbs service has the DNS serverIP, and expose ports DNS uses, which is 10.96.0.10.)
+$ kubectl -n kube-system get svc kube-dns -o yaml 
+
+$ kubectl get pod -l k8s-app --all-namespaces 
+( infa pods all have this label, including coredns)
+
+$ kubectl -n kube-system get pod coredns-34kjeke-djsko -o yaml
+(find the configuration comes from a configmap)
+$ kubectl -n kube-system get configmaps
+$ kubectl -n kube-system get configmaps coredns -o yaml 
+(note the cluster.local domain is listed.)
+
+@addd a rewrite statement such as dev.io will redirect to cluster.local.
+$ kubectl -n kube-system edit configmaps coredns 
+apiVersion: v1
+data:
+  Corefile: |
+    .:53 {
+        rewrite name regex (.*)\.dev\.io {1}.default.svc.cluster.local   #<-- Add this line
+        errors
+        health {
+          lameduck 5s
+        }
+        ...
+    }
+
+$ kubectl -n kube-system delete pod coredns-34kjeke-djsko coredns-dfasfw3-djdsj
+(delete the coredns pods causing them to re-read the updated configmap)
+
+@test if the new service IP to start with a reverse lookup.
+$ kubectl create deployment nginx --image=nginx 
+$ kubectl expose deployment nginx --type=ClusterIP --port=80
+$ kubectl get svc
+nginx  ClusterIP  10.14.24.14  <none>  80/TCP 
+
+@log in the ubtu container and test the URL rewrite starting with the reverse IP resolution.
+$ kubectl exec -it ubtu -- /bin/bash
+-> on container
+ # dig -x 10.14.24.14
+   .. 30   IN  PTR   nginx.default.svc.cluster.local     #<-- the service name becomes part of the FQDN 
+ # dig nginx.default.svc.cluster.local.
+ # dig nginx.dev.io
+ ( it works as nginx.default.svc.cluster.local.)
+ # exit
+
+
+$ kubectl -n kube-system edit configmaps coredns
+...
+data:
+  Corefile: |
+    .:53 {
+        rewrite stop {        #<-- Edit this and following two lines
+          name regex (.*)\.test\.io {1}.default.svc.cluster.local
+          answer name (.*)\.default\.svc\.cluster\.local {1}.dev.io
+        }
+      errors
+      health {
+
+      }
+    }
+
+$ kubectl -n kube-system delete pod coredns-ksdjf-kdfksdj  cpredns-g93849j-dkfdk
+$ kubectl exec -it ubtu -- /bin/bash
+-> on container
+ # dig nginx.dev.io
+ # exit
+
+$ kubectl delete -f nettool.yaml
+
+
+Use Labels to Manage Resources
+$ kubectl delete pods -l system=primary --all-namespaces
+(new Pods generated as the controller managing to continue.)
+$ kubectl -n productdev get deploy --show-labels
+nginx-1   2/2 ready   2 up-to-date   2 available
+@delete the deployment using its label.
+$ kubectl -n productdev delete deploy -l system=primary
+@remove the label from the secondary node.
+$ kubectl label node wrk system-
