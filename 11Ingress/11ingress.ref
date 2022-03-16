@@ -1,0 +1,60 @@
+Overview:
+Ingress ctler do the same as svc, but not part of kube-controller-manager binary.
+Currently supported controller: nginx, GCE.
+HA Proxy is available, but not in stable version.
+The controller is to handle
+- how do we create rules
+- how do we set where the traffic should go.
+Ingress controllers: GKE, nginx, Traefik, Contour and Envoy, etc.
+Use kubectl to create an ingress Rule.
+Use an Ingress Rule to define how the traffic getting routed to internal service ClusterIP.
+
+
+Ingress Ctler:
+- An Ingress Ctler is under networking.k8s.io/vibeta1 group, a daemon running in a Pod watching the /ingresses endpoint on api server.
+- Can be multiple Ingress Crler deployed, up to 3.
+- Traffic uses Annotations to select the target controller; if not, it causes every ctler to execute.
+
+
+NGINX ingress controller:
+- to Deploy: https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.html
+- to do the customization through a ConfigMap, Annotations, etc.
+- use the annotation kubernetes.io/ingress.class: "nginx"
+- setup proxy-real-ip-cidr for L7 traffic
+- to bypasses kube-proxy -> allow session affinity
+- iptables DNAT: don't use "conntrack" entities
+- TLS enabled: the host field is required to define.
+
+
+Google Load Balancer Controller (GLBC):
+- multi-ppol path: 
+  Global Forwarding Rule -> Target HTTP Proxy -> URL map -> Backend Service -> Instance group
+- TLS ingress: 443 port, use the first cert, TLS secret keys (tls.crt, tls.key)
+
+
+Ingress API Resources:
+nano inghost.yaml
+apiVersion: networking.k8s.io/vibeta1
+kind: Ingress
+metadata:
+  name: inghost
+spec:
+  rules:
+    - host: inghost.192.168.9.41.nip.io
+      http:
+        paths:
+        - backend:
+            service
+              name: inghost
+              port:
+                number: 2479
+          path: /
+          pathType: ImplementationSpecific
+
+$ kubectl create -f inghost.yaml
+$ kubectl get ingress
+$ kubectl delete ingress inghost
+$ kubectl edit ingress inghost
+
+
+
