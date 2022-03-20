@@ -60,8 +60,250 @@ $ kubectl edit ingress inghost
 Deploying the Ingress Ctler:
 $ kubectl create -f backend.yaml
 (?? https://kubernetes/ingress-nginx/tree/main/deploy?? can't find backend.yaml)
+?? -> helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.com.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
 
 $ kubectl get pods,rc,svc
 po/default-http-backend-dfjsd9      1/1 READY
 po/nginx-ingress-controller-djfs9   1/1 READY
 ...
+
+
+Creating an Ingress Rule:
+$ kubectl run inghost --image=ghost
+
+$ kubectl expose deployment inghost --port=2479
+
+@you could be able to get access the app from outside the cluster once the deployment exposed and the ingress rules in place.
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+rules:
+  - host: inghost.192.168.9.41.nip.io
+    http:
+      paths:
+      - backend:
+          service
+            name: inghost
+            port:
+              number: 2479
+        path: /
+        pathType: ImplementationsSpecific
+
+
+Multiple Rules:
+
+  - host: inghost.192.168.9.41.nip.io
+    http:
+      paths:
+      - backend:
+          service
+            name: external
+            port:
+              number: 80
+  ....
+  - host: nginx.192.168.9.41.nip.io
+    http:
+      paths:
+      - backend:
+          service
+            name: internal
+            port:
+              number: 8080
+
+
+Intelligent Connected Proxies:
+- A service mesh could serve such as service discovery, rate limiting, traffic mgt and adv metrics.
+- It consists of edge and mebedded proxies talking each other and handling traffic based on rules from a ctl plane.
+- E.g. 
+  Envoy: a modular and extensible proxy favored, used as a data plane under other tools of a service mesh.
+  Istio: leverage Envoy proxies via a multi-component ctl plane, a platform-independent.
+  Linked: fast and ultralight.
+
+
+Deploying Service Mesh:
+
+@tcp:~$ curl -sL run.linkerd.io/install | sh
+export PATH=$PATH:/home/user/.linkerd2/binary
+echo "export PATH=$PATH:/home/user/.linkerd2/bin" >> $HOME/.bashrc
+linkerd check --pre 
+linkerd install | kubectl apply -f -
+linkerd check
+linkerd viz install | kubectl -f -
+linkerd viz check
+linkerd viz dashboard &
+
+If you are using a cloud provider, do
+@tcp:~$ kubectl -n linkerd-viz edit deploy web
+...
+spec:
+  containers:
+  - args:
+    ...
+    - -enforced-host=                   #<-- remove everything after equal sign
+    image: cr...
+    imagePullPolicy: IfNotPresent
+
+$ kubectl edir svc web -n linkerd-viz
+...
+    ports:
+      - name: http
+        nodePort: 32600    #<-- Add line
+        port: 8085
+    ...
+      sessionAffinity: None 
+      type: NodePort      #<-- Edit type to be NodePort
+    status:
+      localBalancer: {}
+
+    ...
+
+@test access using a local browser to your public IP.
+$ curl ifconfig.io
+102.186.148.10
+
+@under your local system to open a browser.
+http://102.186.148.10:32600/namespaces
+
+@add an annotation to let Linkerd to function so use linkerd inject command. You should expect an error but the process will work.
+$ kubectl -n productdev get deploy nginx-1 -o yaml | \
+linkerd inject - | kubectl apply -f -
+
+Please check GUI if productdev namespace and pods are now meshed, and the name is a link.
+
+Use the svclab service (web server) then to generate some traffic on the pods.
+$ kubectl -n productdev get svc 
+e.g. the svclab NodePort IP is 10.12.7.103
+
+$ curl 10.12.7.103
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+...
+
+@scale up to see what'll happen.
+$ kubectl -n productdev scale deploy nginx-1 --replicas=3
+  deployment,apps/nginx-1 scaled
+
+$ curl 10.12.7.103   # do serveral times
+
+
+Deploying the Ingress Controller using NGINX:
+$ helm search hub ingress
+$ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+$ helm repo update
+$ helm fetch ingress-nginx/ingress-nginx --untar
+$ cd ingress-nginx
+:~/ingress-nginx$ ls
+:~/ingress-nginx$ nano values.yaml
+...
+## DaemonSet or deployment
+##
+kind: DaemonSet        #<-- Change to DaemonSet, around line 150
+
+## Annotations to be added to the controller Deployment or DaemonSet
+...
+:~/ingress-nginx$ helm install jkingress .
+
+@an ingress controller running, but no rules yet.
+$ kubectl get ingress --all-namespaces
+$ kubectl -n default get svc -o wide -w jkingress-ingress-nginx-controller
+$ kubectl get pod --all-namespaces " grep nginx
+
+@add riles that to match HTTP headers to services
+$ nano ingress.yaml
+apiVersion: netowrking.k8s.io/v1
+kind: ingress
+metadata:
+  name: ingress-uat 
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  namespace: default
+spec:
+  rules:
+  - host: www.ext.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: web-1
+            port:
+              number: 80
+        path: /
+        pathType: ImplementationSpecific
+status:
+  loadBalancer: {}
+
+$ kubectl creat -f ingress.yaml
+$ kubectl get ingress
+ingress-uat  <none>  www.ext.com   80
+$ kubectl get pod -o wide | grep jkingress
+$ curl 192.168.9.41
+Outcome: <head><title>404 Not Found..
+
+~/ingress-nginx$ kubectl get svc | grep ingress
+~/ingress-nginx$ curl 10.115.238.80       #<--jkingress-ingress-nginx-controller's LB IP
+Outcome: <head><title>404 Not Found
+
+~/ingress-nginx$ curl -H "Host: www.ext.com" http://10.115.238.80
+Outcome: it works.
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+...
+
+@add annotation to the ingres pods for Linkerd. Get some warnings but it works.
+~/ingress-nginx$ kubectl get ds jkingress-ingress-nginx-controller -o yaml | \
+  linkerd inject --ingress - | kubectl apply -f -
+
+@go to Linkerd -> Tools>Top to check the status - ns: default daemonset/jkingress-ingress-nginx-controller.
+
+@edit the second web server welcome page.
+$ kubectl  exec -it web-2 -- /bin/bash 
++->on controller
+root@web-1.../# apt-get updae && apt-get install nano -y
+/# nano /usr/share/nginx/html/index.html
+..
+<title>Internal Welcome Page</title>    #<-- Edit this line
+..
+/# exit 
+
+@edit the ingress rules to point to second service.
+$ kubectl edit ingress ingress-uat 
+...
+spec:
+  rules:
+  - host: int.net
+    http:
+      paths:
+      - backend:
+          service:
+            name: web-2
+            port:
+              number: 80
+        path: /
+        pathType: ImplementationSpecific
+  - host: www.ext.com
+      http:
+        paths:
+        - backend:
+            service:
+              name: web-1
+              port:
+                number: 80
+          path: /
+          pathType: ImplementationSpecific
+status:
+  loadBalancer: {}
+
+@test the second host.
+$ curl -H "Host: int.net" http://10.12.1.8/
+Outcome: it works.
+..
+<title>Internal Welcome Page</title>
+...
+
