@@ -57,4 +57,11 @@ $ kubectl delete ingress inghost
 $ kubectl edit ingress inghost
 
 
+Deploying the Ingress Ctler:
+$ kubectl create -f backend.yaml
+(?? https://kubernetes/ingress-nginx/tree/main/deploy?? can't find backend.yaml)
 
+$ kubectl get pods,rc,svc
+po/default-http-backend-dfjsd9      1/1 READY
+po/nginx-ingress-controller-djfs9   1/1 READY
+...
